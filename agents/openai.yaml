@@ -1,0 +1,4 @@
+interface:
+  display_name: "Aurora TUN 绕过规则"
+  short_description: "安全检查并修改 Aurora TUN 的按进程直连规则"
+  default_prompt: "Use $aurora-tun-bypass to add selected Windows processes to Aurora TUN direct-routing rules with backup and validation."

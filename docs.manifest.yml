@@ -1,0 +1,16 @@
+schema_version: 1
+name: aurora-tun-bypass
+title: Aurora TUN 进程绕过
+description: 安全检查并修改 Aurora Slim 的加密配置，让指定 Windows 进程在 TUN 模式下直连。
+entry: docs/index.md
+nav:
+  - title: 能力展示
+    path: docs/reference.md
+  - title: 使用方式
+    path: docs/usage.md
+  - title: 依赖说明
+    path: docs/dependencies.md
+  - title: 架构概览
+    path: docs/index.md
+status: stable
+
