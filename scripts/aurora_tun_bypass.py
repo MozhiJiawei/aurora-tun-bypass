@@ -4,16 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import ctypes
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+from aurora_rules import active_matches as parse_active_matches
+
+if os.name == "nt":
+    import winreg
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
 
@@ -33,6 +43,8 @@ DEFAULT_CONFIG_KEYS = ("global_tun_config", "tun_config")
 RUNNING_IMAGES = {"aurora.exe", "aurora_slim.exe", "aurora-slim.exe"}
 FILE_ATTRIBUTE_HIDDEN = 0x2
 INVALID_FILE_ATTRIBUTES = 0xFFFFFFFF
+LOCAL_API_BASE = "http://127.0.0.1:18090/api"
+WATCH_RUN_VALUE = "AuroraTunBypass"
 
 
 def decrypt_cfb(blob: bytes, key: bytes) -> bytes:
@@ -89,6 +101,21 @@ def route_rules(config: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return route["rules"]
 
 
+def direct_process_rule(config: dict[str, Any], key: str) -> dict[str, Any]:
+    matches = [
+        rule
+        for rule in route_rules(config, key)
+        if isinstance(rule, dict)
+        and rule.get("outbound") == "direct"
+        and isinstance(rule.get("process_name"), list)
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"expected exactly one direct process_name rule in {key}; found {len(matches)}"
+        )
+    return matches[0]
+
+
 def routing_summary(data: dict[str, Any], keys: list[str]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key in keys:
@@ -129,19 +156,7 @@ def patch_processes(
     changes: list[str] = []
     for key in keys:
         config, was_string = parse_nested_config(data, key)
-        rules = route_rules(config, key)
-        target = next(
-            (
-                rule
-                for rule in rules
-                if isinstance(rule, dict)
-                and rule.get("outbound") == "direct"
-                and isinstance(rule.get("process_name"), list)
-            ),
-            None,
-        )
-        if target is None:
-            raise ValueError(f"no existing direct process_name rule found in {key}")
+        target = direct_process_rule(config, key)
         existing = {str(item).casefold() for item in target["process_name"]}
         for process in processes:
             if process.casefold() not in existing:
@@ -156,6 +171,22 @@ def patch_processes(
     return changes
 
 
+def missing_processes(
+    data: dict[str, Any], keys: list[str], processes: list[str]
+) -> list[str]:
+    missing: list[str] = []
+    for key in keys:
+        config, _ = parse_nested_config(data, key)
+        target = direct_process_rule(config, key)
+        existing = {str(item).casefold() for item in target["process_name"]}
+        missing.extend(
+            f"{key}:{process}"
+            for process in processes
+            if process.casefold() not in existing
+        )
+    return missing
+
+
 def running_aurora_images() -> list[str]:
     if os.name != "nt":
         return []
@@ -167,12 +198,26 @@ def running_aurora_images() -> list[str]:
         encoding="utf-8",
         errors="replace",
     )
-    found = set()
-    for line in completed.stdout.splitlines():
-        image = line.split(",", 1)[0].strip().strip('"').casefold()
+    found: set[str] = set()
+    for row in csv.reader(completed.stdout.splitlines()):
+        if len(row) < 2:
+            continue
+        image = row[0].strip().casefold()
         if image in RUNNING_IMAGES:
             found.add(image)
     return sorted(found)
+
+
+def local_api_post(endpoint: str, timeout: float = 20.0) -> dict[str, Any]:
+    request = Request(f"{LOCAL_API_BASE}/{endpoint}", data=b"", method="POST")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, URLError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Aurora local API {endpoint} failed: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("code") != 1:
+        raise RuntimeError(f"Aurora local API {endpoint} returned failure")
+    return payload
 
 
 def get_windows_attributes(path: Path) -> int | None:
@@ -194,9 +239,15 @@ def replace_preserving_attributes(source: Path, target: Path) -> None:
     attributes = get_windows_attributes(target)
     if attributes is not None:
         set_windows_attributes(target, attributes & ~FILE_ATTRIBUTE_HIDDEN)
+    staged = target.with_name(f".{target.name}.{os.getpid()}.tmp")
     try:
-        shutil.copyfile(source, target)
+        shutil.copyfile(source, staged)
+        with staged.open("rb+") as stream:
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staged, target)
     finally:
+        staged.unlink(missing_ok=True)
         if target.exists():
             set_windows_attributes(target, attributes)
 
@@ -218,6 +269,239 @@ def timestamped_backup(
 
 def write_json(value: dict[str, Any]) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def watch_install_dir() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        raise RuntimeError("LOCALAPPDATA is not available")
+    return Path(local_app_data) / "AuroraTunBypass"
+
+
+def atomic_copy(source: Path, target: Path) -> None:
+    staged = target.with_suffix(target.suffix + ".new")
+    shutil.copy2(source, staged)
+    os.replace(staged, target)
+
+
+def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
+    staged = path.with_suffix(path.suffix + ".new")
+    staged.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(staged, path)
+
+
+def installed_injector_pids(installed_injector: Path) -> list[int]:
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-Command",
+            "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if completed.returncode != 0 or not completed.stdout.strip():
+        return []
+    records = json.loads(completed.stdout)
+    if isinstance(records, dict):
+        records = [records]
+    needle = str(installed_injector).casefold()
+    return [
+        int(record["ProcessId"])
+        for record in records
+        if isinstance(record, dict)
+        and needle in str(record.get("CommandLine") or "").casefold()
+    ]
+
+
+def stop_installed_injector(install_dir: Path, timeout: float = 8.0) -> list[int]:
+    installed_injector = install_dir / "aurora_memory_injector.pyw"
+    stop_file = install_dir / "stop.request"
+    stop_file.touch()
+    deadline = time.monotonic() + timeout
+    pids = installed_injector_pids(installed_injector)
+    while pids and time.monotonic() < deadline:
+        time.sleep(0.25)
+        pids = installed_injector_pids(installed_injector)
+    forced = list(pids)
+    for pid in forced:
+        subprocess.run(
+            ["taskkill.exe", "/PID", str(pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+        )
+    stop_file.unlink(missing_ok=True)
+    return forced
+
+
+def remove_startup_entry() -> bool:
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0,
+            winreg.KEY_SET_VALUE,
+        ) as key:
+            winreg.DeleteValue(key, WATCH_RUN_VALUE)
+        return True
+    except FileNotFoundError:
+        return False
+
+
+def wait_for_memory_hook(status_file: Path, pid: int, targets: list[str], timeout: float) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        try:
+            value = json.loads(status_file.read_text(encoding="utf-8"))
+            if isinstance(value, dict):
+                last = value
+                if (
+                    value.get("event") == "active_rules_verified"
+                    and value.get("injector_pid") == pid
+                    and value.get("ok") is True
+                    and all(value.get("matches", {}).get(name) is True for name in targets)
+                ):
+                    return value
+        except (OSError, json.JSONDecodeError):
+            pass
+        time.sleep(0.25)
+    raise RuntimeError(f"memory hook did not verify active direct rules; last status: {last.get('event', 'none')}")
+
+
+def command_install_memory_hook(args: argparse.Namespace) -> int:
+    if os.name != "nt":
+        raise RuntimeError("memory-hook installation is supported only on Windows")
+    requested = normalize_process_names(args.process)
+    install_dir = watch_install_dir().resolve()
+    injector_source = Path(__file__).with_name("aurora_memory_injector.py")
+    rules_source = Path(__file__).with_name("aurora_rules.py")
+    if not injector_source.is_file() or not rules_source.is_file():
+        raise RuntimeError("memory injector sources are incomplete")
+    frida_spec = importlib.util.find_spec("frida")
+    lib_dir = install_dir / "lib"
+    installed_frida = lib_dir / "frida"
+    if frida_spec is not None and frida_spec.submodule_search_locations:
+        frida_source = Path(next(iter(frida_spec.submodule_search_locations))).resolve()
+    elif installed_frida.is_dir():
+        frida_source = installed_frida.resolve()
+    else:
+        raise RuntimeError(
+            "frida is unavailable; install it into a temporary dependency directory "
+            "and put that directory on PYTHONPATH before running install-memory-hook"
+        )
+    installed_injector = install_dir / "aurora_memory_injector.pyw"
+    installed_rules = install_dir / "aurora_rules.py"
+    settings_file = install_dir / "settings.json"
+    status_file = install_dir / "status.json"
+    install_dir.mkdir(parents=True, exist_ok=True)
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    existing: list[str] = []
+    if settings_file.is_file() and not args.replace_processes:
+        try:
+            existing = list(json.loads(settings_file.read_text(encoding="utf-8")).get("processes", []))
+        except (OSError, json.JSONDecodeError, AttributeError):
+            existing = []
+    processes = normalize_process_names(existing + requested)
+
+    stop_installed_injector(install_dir)
+    atomic_copy(injector_source, installed_injector)
+    atomic_copy(rules_source, installed_rules)
+    if frida_source != installed_frida.resolve():
+        shutil.copytree(frida_source, installed_frida, dirs_exist_ok=True)
+    smoke = subprocess.run(
+        [
+            str(Path(sys.executable).with_name("python.exe")),
+            "-I",
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[1]); import frida; print(frida.__version__)",
+            str(lib_dir),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if smoke.returncode != 0:
+        raise RuntimeError(f"installed Frida import failed: {smoke.stderr.strip()}")
+    atomic_write_json(settings_file, {"processes": processes})
+
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    interpreter = pythonw if pythonw.is_file() else Path(sys.executable)
+    command = subprocess.list2cmdline([str(interpreter), str(installed_injector)])
+    with winreg.CreateKey(
+        winreg.HKEY_CURRENT_USER,
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+    ) as key:
+        winreg.SetValueEx(key, WATCH_RUN_VALUE, 0, winreg.REG_SZ, command)
+    status_file.unlink(missing_ok=True)
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    if interpreter.name.casefold() == "python.exe":
+        creationflags |= subprocess.CREATE_NO_WINDOW
+    injector = subprocess.Popen(
+        [str(interpreter), str(installed_injector)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        creationflags=creationflags,
+    )
+    verified = wait_for_memory_hook(status_file, injector.pid, processes, args.verify_timeout)
+    write_json(
+        {
+            "status": "memory_hook_installed",
+            "install_dir": str(install_dir),
+            "settings": str(settings_file),
+            "injector_pid": injector.pid,
+            "processes": processes,
+            "startup": "HKCU Run",
+            "active_rules_verified": verified.get("ok"),
+        }
+    )
+    return 0
+
+
+def command_uninstall_memory_hook(args: argparse.Namespace) -> int:
+    if os.name != "nt":
+        raise RuntimeError("memory-hook installation is supported only on Windows")
+    install_dir = watch_install_dir().resolve()
+    settings_file = install_dir / "settings.json"
+    targets: list[str] = []
+    if settings_file.is_file():
+        try:
+            targets = normalize_process_names(
+                list(json.loads(settings_file.read_text(encoding="utf-8")).get("processes", []))
+            )
+        except (OSError, ValueError, json.JSONDecodeError, AttributeError):
+            targets = []
+    startup_removed = remove_startup_entry()
+    forced_pids = stop_installed_injector(install_dir)
+    if args.reload_core and running_aurora_images():
+        local_api_post("stopsb")
+        local_api_post("startsb")
+        time.sleep(1)
+    matches: dict[str, bool] = {}
+    if targets:
+        try:
+            with urlopen("http://127.0.0.1:19090/rules", timeout=3) as response:
+                matches = parse_active_matches(response.read().decode("utf-8", "replace"), targets)
+        except Exception:
+            matches = {name: False for name in targets}
+    write_json(
+        {
+            "status": "memory_hook_uninstalled",
+            "startup_removed": startup_removed,
+            "forced_pids": forced_pids,
+            "core_reloaded": bool(args.reload_core),
+            "targets_still_direct": [name for name, present in matches.items() if present],
+        }
+    )
+    return 0
 
 
 def command_inspect(args: argparse.Namespace) -> int:
@@ -263,12 +547,19 @@ def command_patch(args: argparse.Namespace) -> int:
 
     if args.apply:
         running = running_aurora_images()
-        if running and config == DEFAULT_CONFIG.resolve() and not args.allow_running:
+        is_live_default = running and config == DEFAULT_CONFIG.resolve()
+        if is_live_default and not (args.allow_running or args.reload_core):
             raise RuntimeError(
                 "Aurora is running ("
                 + ", ".join(running)
-                + "). Exit Aurora completely or pass --allow-running explicitly."
+                + "). Pass --reload-core only for a diagnostic probe, or "
+                "--allow-running for an unsafe raw write."
             )
+        core_stopped = False
+        if is_live_default and args.reload_core:
+            local_api_post("stopsb")
+            core_stopped = True
+            time.sleep(0.5)
         backup = timestamped_backup(config, output_dir)
         try:
             replace_preserving_attributes(candidate, config)
@@ -277,10 +568,32 @@ def command_patch(args: argparse.Namespace) -> int:
                 raise ValueError(
                     "written Aurora config does not match the validated candidate"
                 )
+            if core_stopped:
+                local_api_post("startsb")
+                core_stopped = False
+                time.sleep(args.stability_wait)
+                stable, _ = decrypt_config(config.read_bytes())
+                missing = missing_processes(stable, args.config_key, processes)
+                if missing:
+                    raise ValueError(
+                        "Aurora rewrote the requested rules after core reload: "
+                        + ", ".join(missing)
+                    )
         except Exception:
             replace_preserving_attributes(backup, config)
+            if core_stopped:
+                try:
+                    local_api_post("startsb")
+                except Exception:
+                    pass
             raise
-        result.update(status="applied", backup=str(backup), running_images=running)
+        result.update(
+            status="applied",
+            backup=str(backup),
+            running_images=running,
+            core_reloaded=bool(is_live_default and args.reload_core),
+            stability_check_ok=True,
+        )
     write_json(result)
     return 0
 
@@ -342,7 +655,42 @@ def build_parser() -> argparse.ArgumentParser:
     patch_parser.add_argument("--output-dir", type=Path, required=True)
     patch_parser.add_argument("--apply", action="store_true")
     patch_parser.add_argument("--allow-running", action="store_true")
+    patch_parser.add_argument(
+        "--reload-core",
+        action="store_true",
+        help="Stop and restart Aurora's proxy core around a live apply.",
+    )
+    patch_parser.add_argument(
+        "--stability-wait",
+        type=float,
+        default=3.0,
+        help="Seconds to wait before verifying the reloaded live config.",
+    )
     patch_parser.set_defaults(handler=command_patch)
+
+    memory_parser = subparsers.add_parser(
+        "install-memory-hook",
+        help="Install the persistent SetConfig in-memory injection maintainer.",
+    )
+    memory_parser.add_argument("--process", action="append", required=True)
+    memory_parser.add_argument(
+        "--replace-processes",
+        action="store_true",
+        help="Replace installed targets instead of merging them.",
+    )
+    memory_parser.add_argument("--verify-timeout", type=float, default=25.0)
+    memory_parser.set_defaults(handler=command_install_memory_hook)
+
+    uninstall_parser = subparsers.add_parser(
+        "uninstall-memory-hook", help="Stop the maintainer and remove its startup entry."
+    )
+    uninstall_parser.add_argument(
+        "--reload-core",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Reload Aurora core to discard the injected in-memory rules (default: true).",
+    )
+    uninstall_parser.set_defaults(handler=command_uninstall_memory_hook)
 
     restore_parser = subparsers.add_parser("restore", help="Restore a validated backup.")
     restore_parser.add_argument("--backup", type=Path, required=True)

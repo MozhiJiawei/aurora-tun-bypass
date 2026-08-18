@@ -6,7 +6,8 @@
 
 | 场景 | 识别到的进程 | 规则变化 | 结果 |
 | --- | --- | --- | --- |
-| 梦幻西游绕过 Aurora 全局 TUN | `my.exe`、`my_new.exe` | 同时追加到 `global_tun_config` 和 `tun_config` 的现有直连规则 | 游戏连接直连，其他未匹配流量继续命中 `Proxy` 兜底。 |
+| 梦幻西游绕过 Aurora 全局 TUN | `my.exe`、`my_new.exe`、`mhtab.exe`、`mhmain.exe`、`mhrender.exe`、`xyqsvc.exe` | 在每次 `Box.SetConfig` 内存入参中追加到现有直连规则 | 强制核心刷新后活动 `/rules` 仍为 6/6 命中，其他未匹配流量保留原代理兜底。 |
+| 微信绕过 Aurora 全局 TUN | `Weixin.exe`、`WeChatAppEx.exe` | 同一内存 hook 追加到现有直连规则 | 更新维护器目标列表后活动 `/rules` 8/8 命中。 |
 
 示例来源是 Windows Aurora Slim `5.2.4` 的真实本地排障，公开材料只保留脱敏后的进程名、规则形状和验证结果；用户配置、账号、订阅、节点与备份均不进入仓库。
 
@@ -19,6 +20,10 @@
 - 保留嵌套配置原有的 JSON 字符串或对象形态。
 - 在写入前生成时间戳备份；写后复验失败时自动回滚；restore 前另存恢复前快照。
 - 处理 Windows 隐藏文件属性，写入后恢复原属性。
+- 动态解析 Go `gopclntab` 定位当前版本 `Box.SetConfig`，不硬编码 ASLR 后地址。
+- 在 `SetConfig` 入口合并内存 JSON；Aurora 每次内部刷新都会经过同一个 hook。
+- 可安装用户级登录启动维护器；重复安装默认合并目标并可靠替换旧实例，卸载会立即停止维护器并重载核心清除注入结果。
+- 活动验证解析 `/rules` JSON，只接受 `direct` 规则中的完整进程名，不使用文本子串猜测。
 
 ## 交付件
 
@@ -37,4 +42,5 @@ backups/
 - 当前只验证过 Aurora Slim `5.2.4`；升级后必须先 inspect。
 - 规则基于 Windows 进程 basename，不按域名、IP 或完整路径匹配。
 - Skill 不保证目标程序只使用一个进程，必须先观察真实运行进程。
-- Skill 不替用户启动、停止或重启 Aurora，也不验证代理节点本身是否可用。
+- Skill 不停止或重启 Aurora GUI；首次附加若活动规则缺失，会短暂重载一次代理核心。
+- Aurora 升级后必须重新解析并验证 Go 符号与调用约定；找不到符号时维护器停止注入，不猜地址。

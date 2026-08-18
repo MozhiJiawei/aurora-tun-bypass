@@ -1,4 +1,4 @@
 interface:
-  display_name: "Aurora TUN ÈÆ¹ý¹æÔò"
-  short_description: "°²È«¼ì²é²¢ÐÞ¸Ä Aurora TUN µÄ°´½ø³ÌÖ±Á¬¹æÔò"
-  default_prompt: "Use $aurora-tun-bypass to add selected Windows processes to Aurora TUN direct-routing rules with backup and validation."
+  display_name: "Aurora TUN ç›´è¿žç»´æŠ¤å™¨"
+  short_description: "å®‰å…¨æ£€æŸ¥å¹¶ç»´æŠ¤ Aurora TUN çš„è¿›ç¨‹ç›´è¿žè§„åˆ™"
+  default_prompt: "Use $aurora-tun-bypass to add selected Windows processes to Aurora TUN direct-routing rules with backup and runtime validation."

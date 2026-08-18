@@ -1,6 +1,6 @@
 ---
 name: aurora-tun-bypass
-description: Inspect, patch, and restore Aurora Slim's encrypted Windows configuration so selected executable names bypass TUN proxying through existing direct-routing rules. Use when Codex needs to exclude a Windows game or application from Aurora TUN global or smart proxy mode, add process_name entries such as my.exe and my_new.exe, verify Aurora's encrypted configuration digest, create a safe backup, or roll back an Aurora routing-rule change.
+description: Inspect, diagnose, safely patch, and restore Aurora Slim's encrypted Windows TUN configuration, and investigate its in-memory refresh behavior. Use when selected Windows executables must bypass Aurora TUN, when process_name rules disappear after Aurora or Windows restarts, or when a durable in-memory injection point must be verified against Aurora's internal GetSBConfig/SetConfig refresh chain.
 ---
 
 # Aurora TUN Bypass
@@ -30,9 +30,10 @@ Safely add Windows executable names to Aurora Slim's existing TUN `direct` rule 
      --output-dir .tmp/aurora-tun-bypass/mhxy
    ```
 
-5. Ask the user to exit Aurora completely, including its tray process. Re-run the same command with `--apply`. The script refuses to modify the live default config while Aurora is running unless `--allow-running` is explicitly supplied. Prefer exiting Aurora over overriding this guard.
-6. Confirm `digest_ok: true`, `round_trip_ok: true`, the expected process names, and the reported backup path. Ask the user to reopen Aurora and reconnect.
-7. If routing is wrong, exit Aurora and restore the exact backup. The restore command creates a second pre-restore snapshot before replacement:
+5. Before any live persistence or injection work, read [docs/behavior-findings.md](docs/behavior-findings.md). Treat it as the maintained source of truth for verified Aurora behavior and append newly verified findings during the investigation.
+6. Use `--reload-core --apply` only as a diagnostic probe. Current Aurora Slim `5.2.4` testing proves that `startsb` regenerates the file from internal state and removes the external patch; a successful disk write is not a successful live repair.
+7. For durable enforcement, install `install-memory-hook`. It dynamically resolves the current Go `Box.SetConfig` symbol, merges process names into each in-memory configuration refresh, and stays attached for the Aurora process lifetime. Re-running the command merges new targets and replaces the running maintainer cleanly. The old file watcher is removed and must not be used.
+8. Verify every runtime experiment with `GET http://127.0.0.1:19090/rules`, then force one `stopsb/startsb` refresh and verify again. Require `status.json` to report `active_rules_verified` with `ok: true`.
 
    ```powershell
    python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py restore `
@@ -42,7 +43,8 @@ Safely add Windows executable names to Aurora Slim's existing TUN `direct` rule 
 
 ## Safety Rules
 
-- Make no live-file change without explicit user authorization.
+- Make no live-file or process-memory change without explicit user authorization. Use file apply only as a diagnostic probe; use the memory hook for durable behavior.
+- `install-memory-hook` adds an HKCU Run entry and a local Frida runtime under `%LOCALAPPDATA%\AuroraTunBypass`. Do this only for an authorized persistence request and report the installed process and status.
 - Never include the user's encrypted configuration, decrypted JSON, account data, or backups in source control.
 - Patch only existing `direct` rules containing a `process_name` list. Stop if the expected route shape is missing; do not invent a rule automatically.
 - Preserve all unrelated configuration fields and whether each nested TUN config is stored as a JSON string or object.
@@ -52,8 +54,7 @@ Safely add Windows executable names to Aurora Slim's existing TUN `direct` rule 
 
 ## Completion Standard
 
-- Dependency check passes.
-- Dry-run reports the intended additions and no unexpected config keys.
-- Apply creates a timestamped backup before replacement.
-- The written file decrypts successfully, its SHA-256 digest matches, and encryption round-trip validation passes.
-- Aurora is restarted by the user and the target application works while unmatched traffic remains proxied.
+- For a file diagnostic, require a clean dry-run, backup before apply, successful decrypt/digest/round-trip checks, and report that it is not persistent.
+- For persistent enforcement, require the HKCU Run entry, exactly one live maintainer, `active_rules_verified` with `ok: true`, and exact target-name matches in active direct `/rules` both before and after one forced Aurora core refresh.
+- For uninstall, require the startup entry and live maintainer to be gone; reload the core so injected rules are discarded immediately.
+- In every mode, confirm unmatched traffic still uses Aurora's existing proxy fallback. Disk inspection alone never satisfies persistent completion.
