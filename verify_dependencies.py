@@ -55,7 +55,7 @@ def main() -> int:
         "required": checks,
         "warnings": [] if ok else [
             "Install cryptography with 'python -m pip install cryptography' if missing.",
-            "Install frida into .tmp/aurora-tun-bypass before install-memory-hook if missing.",
+            "Install frida under the current task's .tmp/runs/<run-id>/aurora-tun-bypass directory before install-memory-hook if missing.",
             "Run this skill on the Windows account where Aurora Slim stores its config.",
         ],
         "not_checked": [

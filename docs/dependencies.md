@@ -15,7 +15,7 @@ python skills/aurora-tun-bypass/verify_dependencies.py
 | Windows | Aurora Slim 与隐藏文件属性处理。 | 在安装 Aurora 的 Windows 用户会话中运行。 |
 | Python 3.10+ | 执行依赖检查和配置脚本。 | 安装受支持的 Python 3。 |
 | `cryptography` | AES-CFB 解密、加密与摘要验证。 | 运行 `python -m pip install cryptography`。 |
-| `frida` | 附加 `Aurora.exe` 并在 `SetConfig` 入口合并内存 JSON。 | 先安装到 `.tmp/aurora-tun-bypass/` 的临时依赖目录，再由 `install-memory-hook` 复制到本机安装目录。 |
+| `frida` | 附加 `Aurora.exe` 并在 `SetConfig` 入口合并内存 JSON。 | 先安装到 `.tmp/runs/<run-id>/aurora-tun-bypass/` 的临时依赖目录，再由 `install-memory-hook` 复制到本机安装目录。 |
 | Aurora Slim 本地配置 | inspect、patch 和 restore 的输入。 | 先正常安装并至少运行一次 Aurora Slim。 |
 | Aurora 本地控制 API | 首次附加且活动规则缺失时触发一次核心重载；后续刷新由 hook 原位处理。 | 确认 Aurora GUI 正常运行并监听 `127.0.0.1:18090`。 |
 | HKCU 登录启动项 | 登录后启动内存 hook 维护器。 | 当前用户必须可写自己的 `Software\Microsoft\Windows\CurrentVersion\Run`。 |

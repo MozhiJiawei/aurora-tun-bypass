@@ -22,12 +22,12 @@ Safely add Windows executable names to Aurora Slim's existing TUN `direct` rule 
    python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py inspect
    ```
 
-4. Dry-run the requested change and write artifacts under `.tmp/aurora-tun-bypass/<task>/`:
+4. Dry-run the requested change and write artifacts under `.tmp/runs/<run-id>/aurora-tun-bypass/<task>/`:
 
    ```powershell
    python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py patch `
      --process my.exe --process my_new.exe `
-     --output-dir .tmp/aurora-tun-bypass/mhxy
+     --output-dir .tmp/runs/<run-id>/aurora-tun-bypass/mhxy
    ```
 
 5. Before any live persistence or injection work, read [docs/behavior-findings.md](docs/behavior-findings.md). Treat it as the maintained source of truth for verified Aurora behavior and append newly verified findings during the investigation.
@@ -37,7 +37,7 @@ Safely add Windows executable names to Aurora Slim's existing TUN `direct` rule 
 
    ```powershell
    python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py restore `
-     --backup .tmp/aurora-tun-bypass/mhxy/backups/aurora-config-<timestamp>.enc `
+     --backup .tmp/runs/<run-id>/aurora-tun-bypass/mhxy/backups/aurora-config-<timestamp>.enc `
      --apply
    ```
 

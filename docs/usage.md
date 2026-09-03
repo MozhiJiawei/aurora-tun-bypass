@@ -39,7 +39,7 @@ python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py inspect
 python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py patch `
   --process my.exe `
   --process my_new.exe `
-  --output-dir .tmp/aurora-tun-bypass/mhxy
+  --output-dir .tmp/runs/<run-id>/aurora-tun-bypass/mhxy
 ```
 
 文件层重载探针（只用于诊断，当前版本会被 `startsb` 重建）：
@@ -48,7 +48,7 @@ python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py patch `
 python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py patch `
   --process my.exe `
   --process my_new.exe `
-  --output-dir .tmp/aurora-tun-bypass/mhxy `
+  --output-dir .tmp/runs/<run-id>/aurora-tun-bypass/mhxy `
   --reload-core --apply
 ```
 
@@ -70,7 +70,7 @@ python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py uninstall-memory-ho
 
 ```powershell
 python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py restore `
-  --backup .tmp/aurora-tun-bypass/mhxy/backups/aurora-config-<timestamp>.enc `
+  --backup .tmp/runs/<run-id>/aurora-tun-bypass/mhxy/backups/aurora-config-<timestamp>.enc `
   --apply
 ```
 
@@ -78,9 +78,9 @@ python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py restore `
 
 ```powershell
 python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py `
-  --config .tmp/aurora-tun-bypass/test/config-copy.enc `
+  --config .tmp/runs/<run-id>/aurora-tun-bypass/test/config-copy.enc `
   patch --process sample-game.exe `
-  --output-dir .tmp/aurora-tun-bypass/test/output `
+  --output-dir .tmp/runs/<run-id>/aurora-tun-bypass/test/output `
   --apply
 ```
 
@@ -90,7 +90,7 @@ python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py `
 | --- | --- |
 | 输入 | Aurora 加密配置、一个或多个可执行文件 basename、目标 TUN 配置键。 |
 | 输出 | 脱敏 JSON 结果、诊断候选与备份；持久化模式安装 `%LOCALAPPDATA%\AuroraTunBypass` 内存维护器和用户级启动项。 |
-| 临时目录 | workspace 根目录下的 `.tmp/aurora-tun-bypass/<task>/`。 |
+| 临时目录 | workspace 根目录下的 `.tmp/runs/<run-id>/aurora-tun-bypass/<task>/`。 |
 
 ## 完成标准
 

@@ -27,7 +27,7 @@
 
 ## 交付件
 
-脚本调用会在 `.tmp/aurora-tun-bypass/<task>/` 生成：
+脚本调用会在 `.tmp/runs/<run-id>/aurora-tun-bypass/<task>/` 生成：
 
 ```text
 patched-config.enc

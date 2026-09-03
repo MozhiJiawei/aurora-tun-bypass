@@ -124,4 +124,4 @@ stopsb
 
 ## 实验产物
 
-本轮原始时间线、加密快照和候选配置位于 `.tmp/aurora-tun-bypass/refresh-analysis/`。它们包含本机敏感配置，只能留在本地临时目录，禁止提交。
+本轮原始时间线、加密快照和候选配置位于 `.tmp/runs/<run-id>/aurora-tun-bypass/refresh-analysis/`。它们包含本机敏感配置，只能留在本地临时目录，禁止提交。
