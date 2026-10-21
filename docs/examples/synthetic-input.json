@@ -1,0 +1,20 @@
+{
+  "example_kind": "synthetic-no-account-data",
+  "global_tun_config": "{\"route\":{\"rules\":[{\"inbound\":\"tun-in\",\"process_name\":[\"example-downloader.exe\"],\"outbound\":\"direct\"},{\"outbound\":\"Proxy\"}]}}",
+  "tun_config": {
+    "route": {
+      "rules": [
+        {
+          "inbound": "tun-in",
+          "process_name": [
+            "example-downloader.exe"
+          ],
+          "outbound": "direct"
+        },
+        {
+          "outbound": "Proxy"
+        }
+      ]
+    }
+  }
+}

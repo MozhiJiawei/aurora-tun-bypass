@@ -1,0 +1,77 @@
+{
+  "example_kind": "synthetic dry-run; not a live Aurora verification",
+  "generated_on": "2026-10-16",
+  "source": "Handwritten minimal fixture; no real account/config/process data",
+  "runtime": {
+    "python": "3.12.10",
+    "system": "Windows"
+  },
+  "command": "python skills/aurora-tun-bypass/scripts/aurora_tun_bypass.py --config <synthetic-input.enc> patch --process sample-game.exe --process sample-helper.exe --output-dir <task-output>",
+  "status": "dry_run",
+  "changes": [
+    "global_tun_config:sample-game.exe",
+    "global_tun_config:sample-helper.exe",
+    "tun_config:sample-game.exe",
+    "tun_config:sample-helper.exe"
+  ],
+  "already_present": false,
+  "digest_ok": true,
+  "round_trip_ok": true,
+  "routing": {
+    "global_tun_config": {
+      "rule_count": 2,
+      "relevant_rules": [
+        {
+          "index": 0,
+          "outbound": "direct",
+          "process_name": [
+            "example-downloader.exe",
+            "sample-game.exe",
+            "sample-helper.exe"
+          ]
+        },
+        {
+          "index": 1,
+          "outbound": "Proxy",
+          "process_name": null
+        }
+      ]
+    },
+    "tun_config": {
+      "rule_count": 2,
+      "relevant_rules": [
+        {
+          "index": 0,
+          "outbound": "direct",
+          "process_name": [
+            "example-downloader.exe",
+            "sample-game.exe",
+            "sample-helper.exe"
+          ]
+        },
+        {
+          "index": 1,
+          "outbound": "Proxy",
+          "process_name": null
+        }
+      ]
+    }
+  },
+  "additional_checks": {
+    "source_unchanged": true,
+    "backup_not_created": true,
+    "string_shape_preserved": true,
+    "object_shape_preserved": true,
+    "both_proxy_fallbacks_preserved": true,
+    "case_insensitive_repeat_idempotent": true,
+    "ambiguous_rule_rejected": true
+  },
+  "not_verified": [
+    "Real Aurora compatibility",
+    "Process attachment or SetConfig hook",
+    "HKCU Run or login startup",
+    "Active /rules or core refresh",
+    "Application traffic or proxy connectivity"
+  ],
+  "cli_sha256": "5d1f104481cd86b40eac02789912b927f2b67afd49ebce04fa3846102bfe4cce"
+}
